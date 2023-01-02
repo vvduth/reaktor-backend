@@ -9,6 +9,7 @@ export const DRONE_URL = "http://assignments.reaktor.com/birdnest/drones";
 export let violdatedDronesSerialNumbers = [];
 export let violatedPilot = [];
 let filterPilotsArray = [];
+let filterViolatedSeriaNumArray = [];
 let closestDistance = null;
 
 const app = express();
@@ -24,6 +25,12 @@ function push1(array, item, x, y) {
 function push2(array, item) {
   if (!array.find((pilotId) => pilotId === item)) {
     array.push(item);
+  }
+}
+
+function pushSerialId(array, item,x,y) {
+  if (!array.find(({serialId}) => serialId === item)) {
+    array.push({ serialId: item, validUntil: Date.now() + 60000 * 10 , x: x, y: y });
   }
 }
 
@@ -104,6 +111,63 @@ export const fetchDrones3 = async () => {
   return filterPilotsArray;
 };
 
+export const fetchDronesNew = async () => {
+  const response = await axios.get(DRONE_URL, {
+    headers: {
+      "Content-Type": "application/xml; charset=utf-8",
+    },
+  });
+  let convertToJsondata = convert.xml2json(response.data, {
+    compact: true,
+    space: 4,
+  });
+  let allDronesInfo = JSON.parse(convertToJsondata);
+
+  for (let drone of allDronesInfo.report.capture.drone) {
+    if (closestDistance === null) {
+      closestDistance = distance(
+        Number(drone.positionY._text),
+        Number(drone.positionX._text)
+      );
+    } else {
+      if (
+        distance(Number(drone.positionY._text), Number(drone.positionX._text)) <
+        closestDistance
+      ) {
+        closestDistance = distance(
+          Number(drone.positionY._text),
+          Number(drone.positionX._text)
+        );
+      }
+    }
+    if (
+      !violateCheckDrone(
+        Number(drone.positionY._text),
+        Number(drone.positionX._text)
+      )
+    ) {
+      // let pilotInfo = await fecthViolatedPilot(drone.serialNumber._text);
+      // push1(
+      //   violatedPilot,
+      //   pilotInfo,
+      //   drone.positionX._text,
+      //   drone.positionY._text
+      // );
+      // filterPilotsArray = violatedPilot.filter(
+      //   (pilot) => Number(pilot.validUntil) - Number(Date.now()) > 1
+      // );
+      pushSerialId(filterViolatedSeriaNumArray, drone.serialNumber._text, drone.positionX._text,drone.positionY._text,)
+      filterViolatedSeriaNumArray = filterViolatedSeriaNumArray.filter((number) => Number(number.validUntil) - Number(Date.now()) > 1)
+
+    }
+  }
+
+  return filterViolatedSeriaNumArray;
+};
+
+export const getPilotsInfoFromSerialArray = () => {
+  
+}
 app.get("/", (req, res) => {
   res.send("<p>Hello and welcome</p>");
 });
@@ -112,7 +176,7 @@ io.on("connection", (socket) => {
   console.log("a user connected");
 
   const interval = setInterval(async () => {
-    socket.emit("sayhi", filterPilotsArray);
+    socket.emit("sayhi", filterViolatedSeriaNumArray);
     socket.emit("closetDistance", closestDistance);
   }, 2000);
 
@@ -126,9 +190,11 @@ io.on("connection", (socket) => {
 server.listen(PORT, () => {
   const updateEvery2Secs = async () => {
     try {
-      await fetchDrones3();
+      await fetchDronesNew();
+      console.log("------------------------")
+      console.log(filterViolatedSeriaNumArray)
     } catch (e) {
-      console.log("overload");
+      console.log(e);
     } finally {
       // do it again in 2 seconds
       setTimeout(updateEvery2Secs, 2000);
